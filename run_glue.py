@@ -28,6 +28,7 @@ import torch
 from torch.utils.data import (DataLoader, RandomSampler, SequentialSampler,
                               TensorDataset)
 from torch.utils.data.distributed import DistributedSampler
+import torch.distributed as dist
 from tqdm import tqdm, trange
 
 # import a previous version of the HuggingFace Transformers package
@@ -56,6 +57,33 @@ MODEL_CLASSES = {
     'xlm': (XLMConfig, XLMForSequenceClassification, XLMTokenizer),
     'roberta': (RobertaConfig, RobertaForSequenceClassification, RobertaTokenizer),
 }
+
+
+def sync_gradients(model, args):
+    if args.local_rank == -1:
+        return
+
+    world_size = dist.get_world_size()
+
+    for param in model.parameters():
+        if param.grad is None:
+            continue
+
+        grad = param.grad.data
+
+        gather_list = None
+        if dist.get_rank() == 0:
+            gather_list = [torch.zeros_like(grad) for _ in range(world_size)]
+
+        dist.gather(grad, gather_list, dst=0)
+
+        if dist.get_rank() == 0:
+            avg = sum(gather_list) / world_size
+            scatter_list = [avg for _ in range(world_size)]
+        else:
+            scatter_list = None
+
+        dist.scatter(grad, scatter_list, src=0)
 
 
 def set_seed(args):
@@ -113,6 +141,7 @@ def train(args, train_dataset, model, tokenizer):
     for _ in train_iterator:
         epoch_iterator = tqdm(train_dataloader, desc="Iteration", disable=args.local_rank not in [-1, 0])
         for step, batch in enumerate(epoch_iterator):
+
             model.train()
             batch = tuple(t.to(args.device) for t in batch)
             inputs = {'input_ids':      batch[0],
@@ -133,6 +162,7 @@ def train(args, train_dataset, model, tokenizer):
                 ##################################################
                 # TODO(cos568): perform backward pass here (expect one line of code)
                 loss.backward()
+                sync_gradients(model, args)
                 ##################################################
                 torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
 
@@ -278,6 +308,7 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False):
 
 
 def main():
+    print("Starting script... waiting for other nodes")
     parser = argparse.ArgumentParser()
 
     ## Required parameters
@@ -348,7 +379,27 @@ def main():
                              "See details at https://nvidia.github.io/apex/amp.html")
     parser.add_argument("--local_rank", type=int, default=-1,
                         help="For distributed training: local_rank. If single-node training, local_rank defaults to -1.")
+    parser.add_argument("--world_size", type=int, default=1)
+    parser.add_argument("--master_ip", type=str, default="127.0.0.1")
+    parser.add_argument("--master_port", type=str, default="29500")
+    
     args = parser.parse_args()
+
+
+    # -----------------------------
+    # Distributed initialization
+    # -----------------------------
+    if args.local_rank != -1:
+        os.environ["MASTER_ADDR"] = args.master_ip
+        os.environ["MASTER_PORT"] = args.master_port
+
+        dist.init_process_group(
+            backend="gloo",   # CPU backend
+            init_method="env://",
+            world_size=args.world_size,
+            rank=args.local_rank,
+        )
+
 
     if os.path.exists(args.output_dir) and os.listdir(args.output_dir) and args.do_train and not args.overwrite_output_dir:
         raise ValueError("Output directory ({}) already exists and is not empty. Use --overwrite_output_dir to overcome.".format(args.output_dir))
@@ -388,7 +439,10 @@ def main():
     ##################################################
     # TODO(cos568): load the model using from_pretrained. Remember to pass in `config` as an argument.
     # If you pass in args.model_name_or_path (e.g. "bert-base-cased"), the model weights file will be downloaded from HuggingFace. (expect one line of code)
-    model = model_class.from_pretrained(args.model_name_or_path)
+    model = model_class.from_pretrained(
+        args.model_name_or_path,
+        config=config
+    )
     ##################################################
 
     if args.local_rank == 0:
