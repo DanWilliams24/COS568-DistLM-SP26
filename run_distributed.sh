@@ -11,11 +11,16 @@ sudo apt-get install -y htop dstat python3-pip
 echo 'export PATH=$HOME/.local/bin:$PATH' >> ~/.bashrc
 source ~/.bashrc
 
-pip install torch==2.5.0 torchvision==0.20.0 torchaudio==2.5.0 --index-url https://download.pytorch.org/whl/cpu
-pip install numpy scipy scikit-learn tqdm pytorch_transformers apex
+if [ ! -d "$HOME/.local/lib/python3.10/site-packages/torch" ]; then
+    pip install torch==2.5.0 torchvision==0.20.0 torchaudio==2.5.0 --index-url https://download.pytorch.org/whl/cpu
+    pip install numpy scipy scikit-learn tqdm pytorch_transformers apex
+fi
 
-mkdir $HOME/glue_data
-python3 download_glue_data.py --data_dir $HOME/glue_data
+if [ "$local_rank" -eq 0 ]; then
+  mkdir -p $HOME/glue_data
+  python3 download_glue_data.py --data_dir $HOME/glue_data
+fi
+
 
 python3 run_glue.py \
   --model_type bert \
@@ -25,12 +30,14 @@ python3 run_glue.py \
   --do_eval \
   --data_dir $GLUE_DIR/$TASK_NAME \
   --max_seq_length 128 \
-  --per_device_train_batch_size 64 \
+  --per_device_train_batch_size 16 \
   --learning_rate 2e-5 \
-  --num_train_epochs 3 \
+  --num_train_epochs 1 \
   --output_dir /tmp/$TASK_NAME/ \
   --overwrite_output_dir \
   --master_ip 128.105.145.218 \
   --master_port 12345 \
   --world_size 4 \
-  --local_rank $local_rank \
+  --local_rank $local_rank
+
+
