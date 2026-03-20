@@ -28,7 +28,7 @@ python3 run_glue.py \
   --task_name $TASK_NAME \
   --do_train \
   --do_eval \
-  --max_steps 5 \ 
+  --max_steps 5 \
   --data_dir $GLUE_DIR/$TASK_NAME \
   --max_seq_length 128 \
   --per_device_train_batch_size 16 \
