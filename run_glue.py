@@ -185,7 +185,8 @@ def train(args, train_dataset, model, tokenizer):
         
         ##################################################
         # TODO(cos568): call evaluate() here to get the model performance after every epoch. (expect one line of code)
-        evaluate(args, model, tokenizer)
+        if args.local_rank in [-1, 0]:
+            evaluate(args, model, tokenizer)
         ##################################################
 
     return global_step, tr_loss / global_step
@@ -246,11 +247,12 @@ def evaluate(args, model, tokenizer, prefix=""):
         results.update(result)
 
         output_eval_file = os.path.join(eval_output_dir, "eval_results.txt")
-        with open(output_eval_file, "w") as writer:
-            logger.info("***** Eval results {} *****".format(prefix))
-            for key in sorted(result.keys()):
-                logger.info("  %s = %s", key, str(result[key]))
-                writer.write("%s = %s\n" % (key, str(result[key])))
+        if args.local_rank in [-1, 0]:
+            with open(output_eval_file, "w") as writer:
+                logger.info("***** Eval results {} *****".format(prefix))
+                for key in sorted(result.keys()):
+                    logger.info("  %s = %s", key, str(result[key]))
+                    writer.write("%s = %s\n" % (key, str(result[key])))
 
     return results
 
