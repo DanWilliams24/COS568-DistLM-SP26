@@ -16,7 +16,7 @@
 """ Finetuning the library models for sequence classification on GLUE (Bert, XLM, XLNet, RoBERTa)."""
 
 from __future__ import absolute_import, division, print_function
-
+from torch.profiler import profile, schedule, ProfilerActivity
 import argparse
 import glob
 import logging
@@ -143,65 +143,83 @@ def train(args, train_dataset, model, tokenizer):
     model.zero_grad()
     train_iterator = trange(int(args.num_train_epochs), desc="Epoch", disable=args.local_rank not in [-1, 0])
     set_seed(args)  # Added here for reproductibility (even between python 2 and 3)
-    for _ in train_iterator:
-        if args.local_rank != -1:
-            train_sampler.set_epoch(_)
-        epoch_iterator = tqdm(train_dataloader, desc="Iteration", disable=args.local_rank not in [-1, 0])
-        for step, batch in enumerate(epoch_iterator):
-            
-            model.train()
-            batch = tuple(t.to(args.device) for t in batch)
-            inputs = {'input_ids':      batch[0],
-                      'attention_mask': batch[1],
-                      'token_type_ids': batch[2] if args.model_type in ['bert', 'xlnet'] else None,  # XLM don't use segment_ids
-                      'labels':         batch[3]}
-            outputs = model(**inputs)
-            loss = outputs[0]  # model outputs are always tuple in pytorch-transformers (see doc)
-
-            if args.gradient_accumulation_steps > 1:
-                loss = loss / args.gradient_accumulation_steps
-
-            if args.fp16:
-                with amp.scale_loss(loss, optimizer) as scaled_loss:
-                    scaled_loss.backward()
-                torch.nn.utils.clip_grad_norm_(amp.master_params(optimizer), args.max_grad_norm)
-            else:
-                ##################################################
-                # TODO(cos568): perform backward pass here (expect one line of code)
-                loss.backward()
+    prof = profile(
+        activities=[ProfilerActivity.CPU],
+        schedule=schedule(
+            wait=1,   # skip first step
+            warmup=1, # optional (can be 0)
+            active=3, # record 3 steps
+            repeat=1
+        ),
+        on_trace_ready=torch.profiler.tensorboard_trace_handler(
+            f"./log_rank_{args.local_rank}"
+        ),
+        record_shapes=True,
+        with_stack=True
+    )
+    with prof:
+        for _ in train_iterator:
+            if args.local_rank != -1:
+                train_sampler.set_epoch(_)
+            epoch_iterator = tqdm(train_dataloader, desc="Iteration", disable=args.local_rank not in [-1, 0])
+            for step, batch in enumerate(epoch_iterator):
                 
-                ##################################################
-                torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
+                model.train()
+                batch = tuple(t.to(args.device) for t in batch)
+                inputs = {'input_ids':      batch[0],
+                        'attention_mask': batch[1],
+                        'token_type_ids': batch[2] if args.model_type in ['bert', 'xlnet'] else None,  # XLM don't use segment_ids
+                        'labels':         batch[3]}
+                outputs = model(**inputs)
+                loss = outputs[0]  # model outputs are always tuple in pytorch-transformers (see doc)
 
-            sync_gradients(model, args)
+                if args.gradient_accumulation_steps > 1:
+                    loss = loss / args.gradient_accumulation_steps
+
+                if args.fp16:
+                    with amp.scale_loss(loss, optimizer) as scaled_loss:
+                        scaled_loss.backward()
+                    torch.nn.utils.clip_grad_norm_(amp.master_params(optimizer), args.max_grad_norm)
+                else:
+                    ##################################################
+                    # TODO(cos568): perform backward pass here (expect one line of code)
+                    loss.backward()
+                    
+                    ##################################################
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
+
+                sync_gradients(model, args)
+                
+                tr_loss += loss.item()
+                if (step + 1) % args.gradient_accumulation_steps == 0:
+                    ##################################################
+                    # TODO(cos568): perform a single optimization step (parameter update) by invoking the optimizer (expect one line of code)
+                    optimizer.step()
+                    ##################################################
+                    scheduler.step() # Update learning rate schedule
+                    model.zero_grad()
+                    prof.step()
+                    global_step += 1
+
+                if args.max_steps > 0 and global_step > args.max_steps:
+                    epoch_iterator.close()
+                    break
+                
+                if step < 5 and args.local_rank == 0:
+                    logger.info(f"loss: {loss.item()}")
+                    
             
-            tr_loss += loss.item()
-            if (step + 1) % args.gradient_accumulation_steps == 0:
-                ##################################################
-                # TODO(cos568): perform a single optimization step (parameter update) by invoking the optimizer (expect one line of code)
-                optimizer.step()
-                ##################################################
-                scheduler.step() # Update learning rate schedule
-                model.zero_grad()
-                global_step += 1
+            ##################################################
+            # TODO(cos568): call evaluate() here to get the model performance after every epoch. (expect one line of code)
+            logger.info(f"Running epoch evaluation...")
+            evaluate(args, model, tokenizer)
+            ##################################################
 
             if args.max_steps > 0 and global_step > args.max_steps:
-                epoch_iterator.close()
+                train_iterator.close()
                 break
-            
-            if step < 5 and args.local_rank == 0:
-                logger.info(f"loss: {loss.item()}")
-                
-        if args.max_steps > 0 and global_step > args.max_steps:
-            train_iterator.close()
-            break
-        
-        ##################################################
-        # TODO(cos568): call evaluate() here to get the model performance after every epoch. (expect one line of code)
-        evaluate(args, model, tokenizer)
-        ##################################################
-        logger.info(f"Not running evaluation. Rank = {args.local_rank}")
 
+    prof.export_chrome_trace(f"trace_rank_{args.local_rank}.json")
     return global_step, tr_loss / global_step
 
 
