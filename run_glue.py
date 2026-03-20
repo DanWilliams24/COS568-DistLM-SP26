@@ -99,7 +99,12 @@ def train(args, train_dataset, model, tokenizer):
     """ Train the model """
 
     args.train_batch_size = args.per_device_train_batch_size
-    train_sampler = RandomSampler(train_dataset)
+    #changed
+    if args.local_rank != -1:
+        train_sampler = DistributedSampler(train_dataset)
+    else:
+        train_sampler = RandomSampler(train_dataset)
+
     train_dataloader = DataLoader(train_dataset, sampler=train_sampler, batch_size=args.train_batch_size)
 
     if args.max_steps > 0:
@@ -139,9 +144,11 @@ def train(args, train_dataset, model, tokenizer):
     train_iterator = trange(int(args.num_train_epochs), desc="Epoch", disable=args.local_rank not in [-1, 0])
     set_seed(args)  # Added here for reproductibility (even between python 2 and 3)
     for _ in train_iterator:
+        if args.local_rank != -1:
+            train_sampler.set_epoch(_)
         epoch_iterator = tqdm(train_dataloader, desc="Iteration", disable=args.local_rank not in [-1, 0])
         for step, batch in enumerate(epoch_iterator):
-
+            
             model.train()
             batch = tuple(t.to(args.device) for t in batch)
             inputs = {'input_ids':      batch[0],
@@ -181,16 +188,19 @@ def train(args, train_dataset, model, tokenizer):
             if args.max_steps > 0 and global_step > args.max_steps:
                 epoch_iterator.close()
                 break
+            
+            if step < 5 and args.local_rank == 0:
+                logger.info(f"loss: {loss.item()}")
+                
         if args.max_steps > 0 and global_step > args.max_steps:
             train_iterator.close()
             break
         
         ##################################################
         # TODO(cos568): call evaluate() here to get the model performance after every epoch. (expect one line of code)
-        if args.local_rank in [-1, 0]:
-            print("RUNNING EVAL ON HOST")
-            evaluate(args, model, tokenizer)
+        evaluate(args, model, tokenizer)
         ##################################################
+        logger.info(f"Not running evaluation. Rank = {args.local_rank}")
 
     return global_step, tr_loss / global_step
 
@@ -204,8 +214,7 @@ def evaluate(args, model, tokenizer, prefix=""):
     for eval_task, eval_output_dir in zip(eval_task_names, eval_outputs_dirs):
         eval_dataset = load_and_cache_examples(args, eval_task, tokenizer, evaluate=True)
 
-        if not os.path.exists(eval_output_dir) and args.local_rank in [-1, 0]:
-            os.makedirs(eval_output_dir)
+        os.makedirs(eval_output_dir, exist_ok=True)
 
         args.eval_batch_size = args.per_device_eval_batch_size
         # Note that DistributedSampler samples randomly
@@ -465,9 +474,7 @@ def main():
         logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
 
     # Evaluation
-    if args.local_rank in [-1, 0]:
-        print("RUNNING EVAL ON HOST")
-        evaluate(args, model, tokenizer, prefix="")
+    evaluate(args, model, tokenizer, prefix="")
 
 if __name__ == "__main__":
     main()
