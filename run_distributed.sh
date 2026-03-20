@@ -28,12 +28,11 @@ python3 run_glue.py \
   --task_name $TASK_NAME \
   --do_train \
   --do_eval \
-  --max_steps 5 \
   --data_dir $GLUE_DIR/$TASK_NAME \
   --max_seq_length 128 \
   --per_device_train_batch_size 16 \
   --learning_rate 2e-5 \
-  --num_train_epochs 3 \
+  --num_train_epochs 1 \
   --output_dir /tmp/$TASK_NAME/ \
   --overwrite_output_dir \
   --master_ip 128.105.145.218 \
