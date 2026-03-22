@@ -199,8 +199,7 @@ def train(args, train_dataset, model, tokenizer):
                     epoch_iterator.close()
                     break
                 
-                if step < 5 and args.local_rank == 0:
-                    logger.info(f"loss: {loss.item()}")
+                logger.info(f"loss: {loss.item()}")
                     
             
             ##################################################
@@ -213,7 +212,6 @@ def train(args, train_dataset, model, tokenizer):
                 train_iterator.close()
                 break
 
-    prof.export_chrome_trace(f"trace_rank_{args.local_rank}.json")
     return global_step, tr_loss / global_step
 
 
