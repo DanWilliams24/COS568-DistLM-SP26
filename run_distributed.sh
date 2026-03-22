@@ -16,10 +16,10 @@ if [ ! -d "$HOME/.local/lib/python3.10/site-packages/torch" ]; then
     pip install numpy scipy scikit-learn tqdm pytorch_transformers apex
 fi
 
-if [ "$local_rank" -eq 0 ]; then
-  mkdir -p $HOME/glue_data
-  python3 download_glue_data.py --data_dir $HOME/glue_data
-fi
+
+mkdir -p $HOME/glue_data
+python3 download_glue_data.py --data_dir $HOME/glue_data
+
 
 
 python3 run_glue.py \
