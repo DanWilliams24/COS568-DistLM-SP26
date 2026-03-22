@@ -22,7 +22,7 @@ python3 download_glue_data.py --data_dir $HOME/glue_data
 
 
 
-python3 run_glue.py \
+python3 run_glue_2b.py \
   --model_type bert \
   --model_name_or_path bert-base-cased \
   --task_name $TASK_NAME \
