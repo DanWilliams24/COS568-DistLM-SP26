@@ -22,7 +22,7 @@ import glob
 import logging
 import os
 import random
-
+import time
 import numpy as np
 import torch
 from torch.utils.data import (DataLoader, RandomSampler, SequentialSampler,
@@ -142,7 +142,7 @@ def train(args, train_dataset, model, tokenizer):
             repeat=1
         ),
         on_trace_ready=torch.profiler.tensorboard_trace_handler(
-            f"./log_rank_{args.local_rank}"
+            f"./log_rank_task2b{args.local_rank}"
         ),
         record_shapes=True,
         with_stack=True
@@ -152,8 +152,9 @@ def train(args, train_dataset, model, tokenizer):
             if args.local_rank != -1:
                 train_sampler.set_epoch(_)
             epoch_iterator = tqdm(train_dataloader, desc="Iteration", disable=args.local_rank not in [-1, 0])
+            iteration_times = []
             for step, batch in enumerate(epoch_iterator):
-                
+                tic = time.perf_counter()
                 model.train()
                 batch = tuple(t.to(args.device) for t in batch)
                 inputs = {'input_ids':      batch[0],
@@ -195,12 +196,19 @@ def train(args, train_dataset, model, tokenizer):
                     epoch_iterator.close()
                     break
                 
-                logger.info(f"loss: {loss.item()}")
+                print(f"[Rank {args.local_rank}] loss: {loss.item()}", flush=True)
+                # measure the time taken for this iteration
+                toc = time.perf_counter()
+                time_taken = toc - tic
+                iteration_times.append(time_taken)
+                logger.info(f"Iteration {step} took {time_taken:0.4f} seconds") # only report on the rank 0 node
+            
                     
             
             ##################################################
             # TODO(cos568): call evaluate() here to get the model performance after every epoch. (expect one line of code)
             logger.info(f"Running epoch evaluation...")
+            logger.info(f"The epoch took on avg {sum(iteration_times)/len(epoch_iterator)} s/iteration")
             evaluate(args, model, tokenizer)
             ##################################################
 
