@@ -35,7 +35,7 @@ python3 run_glue.py \
   --num_train_epochs 1 \
   --output_dir /tmp/$TASK_NAME/ \
   --overwrite_output_dir \
-  --master_ip 128.105.145.218 \
+  --master_ip 128.105.145.135 \
   --master_port 12345 \
   --world_size 4 \
   --local_rank $local_rank
