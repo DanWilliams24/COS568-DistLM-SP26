@@ -155,7 +155,7 @@ def train(args, train_dataset, model, tokenizer):
         for _ in train_iterator:
             if args.local_rank != -1:
                 train_sampler.set_epoch(_)
-            epoch_iterator = tqdm(train_dataloader, desc="Iteration", disable=args.local_rank not in [-1, 0])]
+            epoch_iterator = tqdm(train_dataloader, desc="Iteration", disable=args.local_rank not in [-1, 0])
             iteration_times = []
             for step, batch in enumerate(epoch_iterator):
                 tic = time.perf_counter()
